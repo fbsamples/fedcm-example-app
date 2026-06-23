@@ -1,0 +1,147 @@
+<!--
+  Copyright (c) Meta Platforms, Inc. and affiliates.
+  All rights reserved.
+
+  This source code is licensed under the license found in the
+  LICENSE file in the root directory of this source tree.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>My Palettes — Palette Collector</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+    <script
+      crossorigin="anonymous"
+      src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"
+      integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"
+    ></script>
+    <script
+      crossorigin="anonymous"
+      src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
+      integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"
+    ></script>
+    <script
+      crossorigin="anonymous"
+      src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js"
+      integrity="sha384-BcI7nduYchENm39cFMEVJXHEE7fwHONANyn/pY2YTa+BNtrWF2bKBZeI0wqVithi"
+    ></script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script src="/config.js"></script>
+    <script src="auth.js"></script>
+    <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+    <script src="colors.js"></script>
+    <script src="api.js"></script>
+    <script src="toast.js"></script>
+    <script type="text/babel" src="components.js"></script>
+    <script type="text/babel">
+      function MyPalettesPage() {
+        const [user, setUser] = useState(null);
+        const [palettes, setPalettes] = useState([]);
+        const [loaded, setLoaded] = useState(false);
+
+        const doLogin = async () => {
+          try {
+            const user = await loginWithFedCM();
+            if (user) window.location.reload();
+          } catch (err) {
+            toast.error("Sign in failed: " + err.message);
+          }
+        };
+
+        const doLogout = async () => {
+          await logout();
+          window.location.href = "/";
+        };
+
+        const loadPalettes = useCallback(async () => {
+          try {
+            const data = await fetchMyPalettes();
+            setPalettes(data || []);
+          } catch (err) {
+            console.error("Failed to load palettes:", err);
+            setPalettes([]);
+            toast.error("Couldn't load your palettes. Please try again.");
+          } finally {
+            setLoaded(true);
+          }
+        }, []);
+
+        useEffect(() => {
+          (async () => {
+            const u = await getCurrentUser();
+            setUser(u);
+            if (u) {
+              await loadPalettes();
+            } else {
+              setLoaded(true);
+            }
+          })();
+        }, []);
+
+        const handleDelete = async (id) => {
+          if (!confirm("Delete this palette?")) return;
+          try {
+            await deletePaletteById(id);
+            await loadPalettes();
+            toast.success("Palette deleted");
+          } catch (err) {
+            toast.error("Failed to delete palette: " + err.message);
+          }
+        };
+
+        const navigateToPalette = (palette) => {
+          const params = new URLSearchParams({ colors: palette.colors.join(",") });
+          window.location.href = "/?" + params.toString();
+        };
+
+        return (
+          <>
+            <Nav user={user} activePage="my-palettes" onLogin={doLogin} onLogout={doLogout} />
+            <main className="page">
+              <h1>My Palettes</h1>
+
+              {loaded && !user && (
+                <EmptyState
+                  message="Sign in to save and view your palettes."
+                  actionLabel="Sign In"
+                  onAction={doLogin}
+                />
+              )}
+
+              {loaded && user && palettes.length === 0 && (
+                <EmptyState
+                  message="No palettes yet!"
+                  actionLabel="Create Your First Palette"
+                  actionHref="/"
+                />
+              )}
+
+              {palettes.length > 0 && (
+                <PaletteGrid
+                  palettes={palettes}
+                  renderCard={(p) => (
+                    <PaletteCard
+                      palette={p}
+                      showDelete
+                      showLikeCount
+                      onDelete={handleDelete}
+                      onClick={navigateToPalette}
+                    />
+                  )}
+                />
+              )}
+            </main>
+          </>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<MyPalettesPage />);
+    </script>
+  </body>
+</html>

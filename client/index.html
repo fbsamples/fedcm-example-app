@@ -1,0 +1,523 @@
+<!--
+  Copyright (c) Meta Platforms, Inc. and affiliates.
+  All rights reserved.
+
+  This source code is licensed under the license found in the
+  LICENSE file in the root directory of this source tree.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Palette Collector — FedCM Demo</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@simonwep/pickr@1.9.1/dist/themes/monolith.min.css"
+      integrity="sha384-oLIMyljgDoAKMcdE8NnwkPDsykbzH9DijdrYg4Xz8bTi08Tiz00ig7fqwINfQBRb"
+      crossorigin="anonymous"
+    />
+    <script
+      crossorigin="anonymous"
+      src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"
+      integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"
+    ></script>
+    <script
+      crossorigin="anonymous"
+      src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
+      integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"
+    ></script>
+    <script
+      crossorigin="anonymous"
+      src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js"
+      integrity="sha384-BcI7nduYchENm39cFMEVJXHEE7fwHONANyn/pY2YTa+BNtrWF2bKBZeI0wqVithi"
+    ></script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script
+      crossorigin="anonymous"
+      src="https://cdn.jsdelivr.net/npm/@simonwep/pickr@1.9.1/dist/pickr.min.js"
+      integrity="sha384-wSWLqRWLpvgym6F54BYkfFQGV7k1d670FZV25mzYCxDGWMiLlIb2mOm38NQtlRV8"
+    ></script>
+    <script src="/config.js"></script>
+    <script src="auth.js"></script>
+    <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+    <script src="colors.js"></script>
+    <script src="api.js"></script>
+    <script src="toast.js"></script>
+    <script type="text/babel" src="components.js"></script>
+    <script type="text/babel">
+      const DEFAULT_COLORS = 5;
+      const MAX_COLORS = 6;
+      const MIN_COLORS = 2;
+
+      let nextColorId = 0;
+      function makeColor(hex) {
+        return { id: nextColorId++, hex };
+      }
+
+      function Swatch({ color, index, isActive, canDelete, onSelect, onDelete, onDrop }) {
+        const [dragOver, setDragOver] = useState(false);
+        const [dragging, setDragging] = useState(false);
+
+        return (
+          <div
+            className={`swatch ${isActive ? "active" : ""} ${dragOver ? "drag-over" : ""} ${dragging ? "dragging" : ""}`}
+            style={{ backgroundColor: color, color: contrastColor(color) }}
+            role="button"
+            tabIndex={0}
+            aria-label={`Color ${color}${isActive ? ", selected" : ""}`}
+            aria-pressed={isActive}
+            draggable
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelect(index);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(index);
+              }
+            }}
+            onDragStart={(e) => {
+              e.dataTransfer.setData("text/plain", index);
+              setDragging(true);
+            }}
+            onDragEnd={() => setDragging(false)}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const fromIndex = parseInt(e.dataTransfer.getData("text/plain"), 10);
+              if (fromIndex !== index) onDrop(fromIndex, index);
+            }}
+          >
+            {canDelete && (
+              <button
+                className="swatch-delete"
+                title="Remove color"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(index);
+                }}
+              >
+                &times;
+              </button>
+            )}
+            <span className="hex-label">{color}</span>
+          </div>
+        );
+      }
+
+      function SwatchBar({ colors, activeIndex, onSelect, onDelete, onAdd, onReorder }) {
+        return (
+          <div className="swatches">
+            {colors.map((color, i) => (
+              <Swatch
+                key={color.id}
+                color={color.hex}
+                index={i}
+                isActive={i === activeIndex}
+                canDelete={colors.length > MIN_COLORS}
+                onSelect={onSelect}
+                onDelete={onDelete}
+                onDrop={onReorder}
+              />
+            ))}
+            {colors.length < MAX_COLORS && (
+              <div
+                className="swatch swatch-add"
+                title="Add color"
+                role="button"
+                tabIndex={0}
+                aria-label="Add color"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAdd();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onAdd();
+                  }
+                }}
+              >
+                <span className="swatch-add-icon">+</span>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      function EditorPanel({ visible, activeColor, onChange }) {
+        const containerRef = useRef(null);
+        const pickrRef = useRef(null);
+        const onChangeRef = useRef(onChange);
+        onChangeRef.current = onChange;
+
+        useEffect(() => {
+          if (!containerRef.current) return;
+          const el = document.createElement("div");
+          containerRef.current.appendChild(el);
+
+          const p = Pickr.create({
+            el,
+            theme: "monolith",
+            container: containerRef.current,
+            inline: true,
+            showAlways: true,
+            default: activeColor || "#000000",
+            components: {
+              preview: true,
+              opacity: false,
+              hue: true,
+              interaction: { hex: true, input: true },
+            },
+          });
+
+          p.on("change", (color) => {
+            onChangeRef.current(color.toHEXA().toString().slice(0, 7));
+          });
+
+          pickrRef.current = p;
+
+          return () => {
+            p.destroyAndRemove();
+          };
+        }, []);
+
+        useEffect(() => {
+          if (pickrRef.current && activeColor) {
+            pickrRef.current.setColor(activeColor);
+          }
+        }, [activeColor]);
+
+        useEffect(() => {
+          if (pickrRef.current) {
+            if (visible) pickrRef.current.show();
+            else pickrRef.current.hide();
+          }
+        }, [visible]);
+
+        return (
+          <div
+            className="editor-panel"
+            ref={containerRef}
+            style={{ display: visible ? "flex" : "none" }}
+          />
+        );
+      }
+
+      function CssSnippet({ colors }) {
+        const [format, setFormat] = useState("hex");
+        const [copied, setCopied] = useState(false);
+
+        const snippet = `:root {\n${colors.map((c, i) => {
+          const value = format === "rgba" ? hexToRgba(c) : c;
+          return `  --color-${i + 1}: ${value};`;
+        }).join("\n")}\n}`;
+
+        const handleCopy = () => {
+          navigator.clipboard.writeText(snippet).catch(() => {});
+          setCopied(true);
+          setTimeout(() => setCopied(false), 800);
+        };
+
+        return (
+          <div className="css-snippet-section">
+            <div className="css-snippet-header">
+              <span className="css-snippet-title">CSS Variables</span>
+              <div className="css-snippet-controls">
+                <div className="toggle-group">
+                  <button
+                    className={`toggle-btn ${format === "hex" ? "active" : ""}`}
+                    onClick={() => setFormat("hex")}
+                  >
+                    HEX
+                  </button>
+                  <button
+                    className={`toggle-btn ${format === "rgba" ? "active" : ""}`}
+                    onClick={() => setFormat("rgba")}
+                  >
+                    RGBA
+                  </button>
+                </div>
+                <button className="btn-small btn-outline" onClick={handleCopy}>
+                  {copied ? "Copied!" : "Copy"}
+                </button>
+              </div>
+            </div>
+            <pre className="css-snippet-code">{snippet}</pre>
+          </div>
+        );
+      }
+
+      function SaveModal({ show, colors, onSave, onClose }) {
+        const [name, setName] = useState("");
+        const [error, setError] = useState("");
+        const [saving, setSaving] = useState(false);
+        const inputRef = useRef(null);
+
+        useEffect(() => {
+          if (show) {
+            setName("");
+            setError("");
+            setTimeout(() => inputRef.current?.focus(), 0);
+          }
+        }, [show]);
+
+        useEffect(() => {
+          const handleKey = (e) => {
+            if (e.key === "Escape") onClose();
+          };
+          if (show) document.addEventListener("keydown", handleKey);
+          return () => document.removeEventListener("keydown", handleKey);
+        }, [show, onClose]);
+
+        const handleSave = async () => {
+          const trimmed = name.trim();
+          if (!trimmed) {
+            setError("Give your palette a name!");
+            return;
+          }
+          setSaving(true);
+          try {
+            await onSave(trimmed, colors);
+            onClose();
+          } catch (err) {
+            setError(err.message);
+          } finally {
+            setSaving(false);
+          }
+        };
+
+        if (!show) return null;
+
+        return (
+          <div className="modal-overlay" onClick={(e) => {
+            if (e.target === e.currentTarget) onClose();
+          }}>
+            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="save-modal-title">
+              <h2 id="save-modal-title">Save Palette</h2>
+              <div className="modal-preview">
+                {colors.map((c, i) => (
+                  <div key={i} className="mini-swatch" style={{ background: c }} />
+                ))}
+              </div>
+              <input
+                ref={inputRef}
+                type="text"
+                placeholder="Name your palette…"
+                maxLength={50}
+                autoComplete="off"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
+              />
+              <div className="modal-actions">
+                <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+                <button className="btn btn-primary" disabled={saving} onClick={handleSave}>
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              </div>
+              <p className="modal-error" role="alert">{error}</p>
+            </div>
+          </div>
+        );
+      }
+
+      function GeneratorPage() {
+        const [user, setUser] = useState(null);
+        const [colors, setColors] = useState([]);
+        const [activeIndex, setActiveIndex] = useState(null);
+        const [showModal, setShowModal] = useState(false);
+
+        const doLogin = async () => {
+          try {
+            const user = await loginWithFedCM();
+            if (user) reloadWithColors();
+          } catch (err) {
+            toast.error("Sign in failed: " + err.message);
+          }
+        };
+
+        const doLogout = async () => {
+          await logout();
+          window.location.href = "/";
+        };
+
+        const hexColors = colors.map((c) => c.hex);
+
+        const reloadWithColors = () => {
+          const params = new URLSearchParams({ colors: hexColors.join(",") });
+          window.location.href = "/?" + params.toString();
+        };
+
+        useEffect(() => {
+          (async () => {
+            const u = await getCurrentUser();
+            setUser(u);
+          })();
+
+          const urlColors = new URLSearchParams(window.location.search).get("colors");
+          if (urlColors) {
+            setColors(urlColors.split(",").map((c) => makeColor(c.trim())));
+          } else {
+            setColors(Array.from({ length: DEFAULT_COLORS }, () => makeColor(randomColor())));
+          }
+        }, []);
+
+        // Click outside to dismiss picker
+        useEffect(() => {
+          const handleClick = (e) => {
+            if (activeIndex === null) return;
+            if (e.target.closest(".generator-layout")) return;
+            setActiveIndex(null);
+          };
+          document.addEventListener("click", handleClick);
+          return () => document.removeEventListener("click", handleClick);
+        }, [activeIndex]);
+
+        // Escape to dismiss picker
+        useEffect(() => {
+          const handleKey = (e) => {
+            if (e.key === "Escape" && activeIndex !== null) {
+              setActiveIndex(null);
+            }
+          };
+          document.addEventListener("keydown", handleKey);
+          return () => document.removeEventListener("keydown", handleKey);
+        }, [activeIndex]);
+
+        const handleColorChange = (newHex) => {
+          if (activeIndex === null) return;
+          setColors((prev) => {
+            const next = [...prev];
+            next[activeIndex] = { ...next[activeIndex], hex: newHex };
+            return next;
+          });
+        };
+
+        const handleAddColor = () => {
+          const newColor = makeColor(randomColor());
+          setColors((prev) => {
+            setActiveIndex(prev.length);
+            return [...prev, newColor];
+          });
+        };
+
+        const handleRemoveColor = (index) => {
+          setColors((prev) => prev.filter((_, i) => i !== index));
+          if (activeIndex === index) {
+            setActiveIndex(null);
+          } else if (activeIndex !== null && activeIndex > index) {
+            setActiveIndex((prev) => prev - 1);
+          }
+        };
+
+        const handleReorder = (fromIndex, toIndex) => {
+          setColors((prev) => {
+            const next = [...prev];
+            const [moved] = next.splice(fromIndex, 1);
+            next.splice(toIndex, 0, moved);
+            return next;
+          });
+          setActiveIndex((prev) => {
+            if (prev === null) return null;
+            if (prev === fromIndex) return toIndex;
+            if (fromIndex < prev && toIndex >= prev) return prev - 1;
+            if (fromIndex > prev && toIndex <= prev) return prev + 1;
+            return prev;
+          });
+        };
+
+        const handleOpenSave = () => {
+          if (!user) {
+            doLogin();
+            return;
+          }
+          setShowModal(true);
+        };
+
+        const handleSave = async (name, paletteColors) => {
+          const saved = await savePalette(name, paletteColors);
+          toast.success(`Saved "${saved.name}"`);
+          return saved;
+        };
+
+        const handleDevLogin = async () => {
+          const response = await fetch("/auth/dev-login", { method: "POST" });
+          if (response.ok) reloadWithColors();
+        };
+
+        if (colors.length === 0) return null;
+
+        return (
+          <>
+            <Nav user={user} activePage="generator" onLogin={doLogin} onLogout={doLogout} />
+            <main className="generator-page">
+              <h1>Create a Palette</h1>
+              <p className="subtitle">Click any color to change it. Sign in to save your favorites.</p>
+
+              <div className="generator-layout">
+                <SwatchBar
+                  colors={colors}
+                  activeIndex={activeIndex}
+                  onSelect={setActiveIndex}
+                  onDelete={handleRemoveColor}
+                  onAdd={handleAddColor}
+                  onReorder={handleReorder}
+                />
+                <EditorPanel
+                  visible={activeIndex !== null}
+                  activeColor={activeIndex !== null ? colors[activeIndex].hex : null}
+                  onChange={handleColorChange}
+                />
+              </div>
+
+              <div className="generator-actions">
+                <button className="btn btn-primary" onClick={handleOpenSave}>Save Palette</button>
+              </div>
+
+              <CssSnippet colors={hexColors} />
+
+              <SaveModal
+                show={showModal}
+                colors={hexColors}
+                onSave={handleSave}
+                onClose={() => setShowModal(false)}
+              />
+
+              {!isFedCMSupported() && (
+                <div className="unsupported">
+                  <strong>FedCM not supported.</strong> Your browser does not support the{" "}
+                  <a href="https://developer.mozilla.org/en-US/docs/Web/API/FedCM_API" target="_blank" rel="noopener noreferrer">
+                    Federated Credential Management API
+                  </a>. Try Chrome 136 or later.
+                </div>
+              )}
+
+              {window.__CONFIG__.DEV_LOGIN && !user && (
+                <div id="dev-login">
+                  <button className="btn-small btn-outline" onClick={handleDevLogin}>
+                    Dev Login (skip auth)
+                  </button>
+                </div>
+              )}
+            </main>
+          </>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<GeneratorPage />);
+    </script>
+  </body>
+</html>

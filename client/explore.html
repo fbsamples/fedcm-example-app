@@ -1,0 +1,161 @@
+<!--
+  Copyright (c) Meta Platforms, Inc. and affiliates.
+  All rights reserved.
+
+  This source code is licensed under the license found in the
+  LICENSE file in the root directory of this source tree.
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Explore — Palette Collector</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+    <script
+      crossorigin="anonymous"
+      src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"
+      integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"
+    ></script>
+    <script
+      crossorigin="anonymous"
+      src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
+      integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"
+    ></script>
+    <script
+      crossorigin="anonymous"
+      src="https://unpkg.com/@babel/standalone@7.26.10/babel.min.js"
+      integrity="sha384-BcI7nduYchENm39cFMEVJXHEE7fwHONANyn/pY2YTa+BNtrWF2bKBZeI0wqVithi"
+    ></script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script src="/config.js"></script>
+    <script src="auth.js"></script>
+    <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
+    <script src="colors.js"></script>
+    <script src="api.js"></script>
+    <script src="toast.js"></script>
+    <script type="text/babel" src="components.js"></script>
+    <script type="text/babel">
+      function ExplorePage() {
+        const [user, setUser] = useState(null);
+        const [palettes, setPalettes] = useState([]);
+        const [sort, setSort] = useState("newest");
+        const [loaded, setLoaded] = useState(false);
+
+        const doLogin = async () => {
+          try {
+            const user = await loginWithFedCM();
+            if (user) window.location.reload();
+          } catch (err) {
+            toast.error("Sign in failed: " + err.message);
+          }
+        };
+
+        const doLogout = async () => {
+          await logout();
+          window.location.href = "/";
+        };
+
+        const loadPalettes = useCallback(async (sortBy) => {
+          try {
+            const data = await fetchPalettes(sortBy);
+            setPalettes(data || []);
+          } catch (err) {
+            console.error("Failed to load palettes:", err);
+            setPalettes([]);
+            toast.error("Couldn't load palettes. Please try again.");
+          } finally {
+            setLoaded(true);
+          }
+        }, []);
+
+        useEffect(() => {
+          (async () => {
+            const u = await getCurrentUser();
+            setUser(u);
+          })();
+        }, []);
+
+        useEffect(() => {
+          loadPalettes(sort);
+        }, [sort, loadPalettes]);
+
+        const handleLike = async (id) => {
+          if (!user) {
+            doLogin();
+            return;
+          }
+          const updated = await toggleLikePalette(id);
+          if (updated) {
+            setPalettes((prev) =>
+              prev.map((p) => (p.id === id ? { ...p, likes: updated.likes, likedByMe: updated.likedByMe } : p))
+            );
+          } else {
+            toast.error("Couldn't update like. Please try again.");
+          }
+        };
+
+        const navigateToPalette = (palette) => {
+          const params = new URLSearchParams({ colors: palette.colors.join(",") });
+          window.location.href = "/?" + params.toString();
+        };
+
+        return (
+          <>
+            <Nav user={user} activePage="explore" onLogin={doLogin} onLogout={doLogout} />
+            <main className="page">
+              <div className="page-header">
+                <div>
+                  <h1>Explore Palettes</h1>
+                  <p className="subtitle">Recently saved palettes from the community.</p>
+                </div>
+                <div className="sort-controls">
+                  <label className="sort-label" htmlFor="sort-select">Sort by</label>
+                  <select
+                    id="sort-select"
+                    className="sort-select"
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value)}
+                  >
+                    <option value="newest">Newest</option>
+                    <option value="oldest">Oldest</option>
+                    <option value="most-liked">Most Liked</option>
+                  </select>
+                </div>
+              </div>
+
+              {loaded && palettes.length === 0 && (
+                <EmptyState
+                  message="No palettes have been created yet. Be the first!"
+                  actionLabel="Create a Palette"
+                  actionHref="/"
+                />
+              )}
+
+              {palettes.length > 0 && (
+                <PaletteGrid
+                  palettes={palettes}
+                  renderCard={(p) => (
+                    <PaletteCard
+                      palette={p}
+                      showAuthor
+                      showLike
+                      onLike={handleLike}
+                      onClick={navigateToPalette}
+                    />
+                  )}
+                />
+              )}
+            </main>
+          </>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<ExplorePage />);
+    </script>
+  </body>
+</html>

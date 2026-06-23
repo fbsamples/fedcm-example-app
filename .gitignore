@@ -1,0 +1,16 @@
+node_modules/
+.env
+certs/
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Local tooling
+.claude/
+
+# Test / coverage output
+coverage/
+*.log
