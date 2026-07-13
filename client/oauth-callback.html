@@ -1,0 +1,82 @@
+<!--
+  Copyright (c) Meta Platforms, Inc. and affiliates.
+  All rights reserved.
+
+  This source code is licensed under the license found in the
+  LICENSE file in the root directory of this source tree.
+
+  Google redirect-fallback landing page. Google's OAuth 2.0 implicit flow
+  returns the id_token in the URL *fragment*, which the server never receives —
+  so this page reads it client-side, validates the CSRF `state`, and hands the
+  token to the existing POST /auth/verify endpoint (same path FedCM uses).
+-->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Signing you in… — Palette Collector</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="/config.js"></script>
+  </head>
+  <body>
+    <main class="page auth-callback">
+      <h1 id="status-title">Signing you in…</h1>
+      <p id="status-msg">Completing Google sign-in.</p>
+      <p><a id="back-link" href="/" hidden>Back to Palette Collector</a></p>
+    </main>
+    <script>
+      (function () {
+        const titleEl = document.getElementById("status-title");
+        const msgEl = document.getElementById("status-msg");
+        const backLink = document.getElementById("back-link");
+
+        function fail(message) {
+          titleEl.textContent = "Sign-in failed";
+          msgEl.textContent = message;
+          backLink.hidden = false;
+        }
+
+        const returnTo = sessionStorage.getItem("googleOAuthReturnTo") || "/";
+        const expectedState = sessionStorage.getItem("googleOAuthState");
+        sessionStorage.removeItem("googleOAuthState");
+        sessionStorage.removeItem("googleOAuthReturnTo");
+
+        // The id_token and state come back in the URL fragment.
+        const params = new URLSearchParams(window.location.hash.slice(1));
+        const error = params.get("error");
+        if (error) {
+          fail("Google returned an error: " + error);
+          return;
+        }
+
+        const idToken = params.get("id_token");
+        const state = params.get("state");
+        if (!idToken) {
+          fail("No credential was returned. Please try signing in again.");
+          return;
+        }
+        if (!expectedState || state !== expectedState) {
+          fail("Sign-in could not be verified (state mismatch). Please try again.");
+          return;
+        }
+
+        fetch("/auth/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            configURL: window.__CONFIG__.GOOGLE_CONFIG_URL,
+            token: idToken,
+          }),
+        })
+          .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+          .then(({ ok, data }) => {
+            if (!ok) throw new Error(data.error || "Verification failed");
+            window.location.replace(returnTo);
+          })
+          .catch((err) => fail(err.message));
+      })();
+    </script>
+  </body>
+</html>

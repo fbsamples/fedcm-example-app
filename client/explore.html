@@ -45,11 +45,16 @@
         const [palettes, setPalettes] = useState([]);
         const [sort, setSort] = useState("newest");
         const [loaded, setLoaded] = useState(false);
+        const [showFallback, setShowFallback] = useState(false);
 
         const doLogin = async () => {
           try {
-            const user = await loginWithFedCM();
-            if (user) window.location.reload();
+            const result = await loginWithFedCM();
+            if (result.status === "success") {
+              window.location.reload();
+            } else if (result.status === "unavailable" || result.status === "unsupported") {
+              setShowFallback(true);
+            }
           } catch (err) {
             toast.error("Sign in failed: " + err.message);
           }
@@ -106,7 +111,15 @@
 
         return (
           <>
-            <Nav user={user} activePage="explore" onLogin={doLogin} onLogout={doLogout} />
+            <Nav
+              user={user}
+              activePage="explore"
+              onLogin={doLogin}
+              onLogout={doLogout}
+              showFallback={showFallback}
+              onFallbackClose={() => setShowFallback(false)}
+              onProviderSuccess={() => window.location.reload()}
+            />
             <main className="page">
               <div className="page-header">
                 <div>

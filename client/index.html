@@ -339,11 +339,19 @@
         const [colors, setColors] = useState([]);
         const [activeIndex, setActiveIndex] = useState(null);
         const [showModal, setShowModal] = useState(false);
+        const [showFallback, setShowFallback] = useState(false);
 
         const doLogin = async () => {
           try {
-            const user = await loginWithFedCM();
-            if (user) reloadWithColors();
+            const result = await loginWithFedCM();
+            if (result.status === "success") {
+              reloadWithColors();
+            } else if (result.status === "unavailable" || result.status === "unsupported") {
+              // No unified chooser (cold/incognito) or no FedCM — offer the
+              // per-provider fallback instead of dead-ending. "dismissed" is
+              // left silent.
+              setShowFallback(true);
+            }
           } catch (err) {
             toast.error("Sign in failed: " + err.message);
           }
@@ -462,7 +470,15 @@
 
         return (
           <>
-            <Nav user={user} activePage="generator" onLogin={doLogin} onLogout={doLogout} />
+            <Nav
+              user={user}
+              activePage="generator"
+              onLogin={doLogin}
+              onLogout={doLogout}
+              showFallback={showFallback}
+              onFallbackClose={() => setShowFallback(false)}
+              onProviderSuccess={reloadWithColors}
+            />
             <main className="generator-page">
               <h1>Create a Palette</h1>
               <p className="subtitle">Click any color to change it. Sign in to save your favorites.</p>
@@ -495,15 +511,6 @@
                 onSave={handleSave}
                 onClose={() => setShowModal(false)}
               />
-
-              {!isFedCMSupported() && (
-                <div className="unsupported">
-                  <strong>FedCM not supported.</strong> Your browser does not support the{" "}
-                  <a href="https://developer.mozilla.org/en-US/docs/Web/API/FedCM_API" target="_blank" rel="noopener noreferrer">
-                    Federated Credential Management API
-                  </a>. Try Chrome 136 or later.
-                </div>
-              )}
 
               {window.__CONFIG__.DEV_LOGIN && !user && (
                 <div id="dev-login">

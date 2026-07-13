@@ -168,7 +168,8 @@ Once `findOrCreateUser` returns, the server stashes the user's internal id in th
 │   ├── index.html         Palette generator (login entry point)
 │   ├── my-palettes.html   Signed-in user's saved palettes
 │   ├── explore.html       Public feed of saved palettes
-│   ├── auth.js            FedCM client logic + FB SDK glue
+│   ├── oauth-callback.html Google redirect-fallback landing page
+│   ├── auth.js            FedCM client logic + FB SDK glue + fallback ladder
 │   ├── api.js             fetch() wrappers for /api/palettes
 │   ├── components.js      Shared React components (Nav, PaletteCard, ...)
 │   ├── colors.js          Hex/HSL math, contrast, random color
@@ -220,12 +221,27 @@ On unsupported browsers, the sign-in surface shows a "FedCM not supported" notic
 
 The linking lookup is by exact email match. If your Facebook and Google accounts are registered under different emails, they'll be treated as two separate users.
 
+## Cold start (no cookies / incognito)
+
+FedCM's account list comes from the IdP's **own first-party cookies** on `accounts.google.com` / `facebook.com` — not third-party cookies. In a fresh incognito window (or after clearing cookies), the user isn't signed into either IdP, so the browser's **passive** account chooser shows nothing and `navigator.credentials.get()` rejects generically. Passive mode alone cannot sign a logged-out user in.
+
+This sample handles that with an **escalation ladder** (`client/auth.js`, `AuthFallback` in `client/components.js`):
+
+1. **Primary** — passive, multi-provider FedCM: the unified chooser, shown when the user is already signed into an IdP.
+2. **Fallback** — surfaced when the primary yields nothing or FedCM is unsupported. Per-provider buttons that first try single-provider **active-mode** FedCM (`mode: "active"`, which opens the IdP's sign-in dialog for logged-out users), then fall back to:
+   - **Google** — a full-page OAuth 2.0 implicit redirect (`response_type=id_token`). The `id_token` returns in the URL fragment and is verified by `client/oauth-callback.html` via the existing `POST /auth/verify`.
+   - **Facebook** — the SDK's own `FB.login()` popup, which prompts for Facebook sign-in and yields a Graph-API access token.
+
+All paths reuse the same `/auth/nonce` + `/auth/verify` backend and account-linking logic — only client-side token acquisition differs. No client secrets are required.
+
+> **Google Cloud Console setup:** the redirect fallback needs `https://localhost:3000/oauth-callback.html` added as an **Authorized redirect URI** on your OAuth 2.0 Client ID (the FedCM-only flow needed just the origin). Adjust the host/port if you don't run on the default `3000`.
+
 ## Fallback Strategies
 
-For an app that needs to support all browsers:
+The escalation ladder above is implemented in this sample, but the building blocks generalize:
 
 1. **Feature-detect FedCM** — check for `window.IdentityCredential` (`isFedCMSupported()` in `client/auth.js`).
-2. **Fall back to redirect-based OAuth** — use the standard authorization-code flow for Facebook and Google. Both providers' SDKs handle this without FedCM.
+2. **Fall back to redirect-based OAuth** — this sample uses Google's implicit `id_token` redirect and Facebook's SDK login. A production app may prefer the authorization-code flow (which requires server-side client secrets).
 3. **Reuse the same backend** — `POST /auth/verify` works for any token shape the providers return; only the client-side acquisition differs.
 
 ## Notes & Limitations

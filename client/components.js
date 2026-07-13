@@ -7,7 +7,15 @@
 
 const { useState, useEffect, useRef, useCallback } = React;
 
-function Nav({ user, activePage, onLogin, onLogout }) {
+function Nav({
+  user,
+  activePage,
+  onLogin,
+  onLogout,
+  showFallback,
+  onFallbackClose,
+  onProviderSuccess,
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const links = [
@@ -32,6 +40,26 @@ function Nav({ user, activePage, onLogin, onLogout }) {
       document.removeEventListener("keydown", handleKey);
     };
   }, [menuOpen]);
+
+  // Close the sign-in fallback dropdown on outside click / Escape. `doLogin`
+  // sets showFallback asynchronously (after awaiting FedCM), so the click that
+  // opened it has already finished propagating by the time this listener binds.
+  useEffect(() => {
+    if (!showFallback) return;
+    const handleClick = (e) => {
+      if (e.target.closest(".nav-signin")) return;
+      onFallbackClose && onFallbackClose();
+    };
+    const handleKey = (e) => {
+      if (e.key === "Escape") onFallbackClose && onFallbackClose();
+    };
+    document.addEventListener("click", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("click", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [showFallback, onFallbackClose]);
 
   return (
     <nav id="nav"><div className="nav-inner">
@@ -62,7 +90,24 @@ function Nav({ user, activePage, onLogin, onLogout }) {
             <button className="btn-small btn-outline" onClick={onLogout}>Sign Out</button>
           </div>
         ) : (
-          <button className="btn-small btn-primary" onClick={onLogin}>Sign In</button>
+          <div className="nav-signin">
+            <button
+              className="btn-small btn-primary"
+              onClick={onLogin}
+              aria-haspopup="menu"
+              aria-expanded={!!showFallback}
+            >
+              Sign In
+            </button>
+            {showFallback && (
+              <div className="nav-signin-dropdown" role="menu">
+                <AuthFallback
+                  onSuccess={onProviderSuccess}
+                  onClose={onFallbackClose}
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
       <button
@@ -78,6 +123,85 @@ function Nav({ user, activePage, onLogin, onLogout }) {
         <span className="bar" />
       </button>
     </div></nav>
+  );
+}
+
+// Shown when the unified FedCM chooser can't be used — the user isn't signed
+// into any IdP (cold/incognito) or the browser lacks FedCM. Each button walks
+// the fallback ladder: single-provider active-mode FedCM first (opens the IdP
+// sign-in when logged out), then a guaranteed redirect / SDK path.
+function AuthFallback({ onSuccess, onClose }) {
+  const returnTo = () =>
+    typeof window !== "undefined"
+      ? window.location.pathname + window.location.search
+      : "/";
+
+  const handleGoogle = async () => {
+    // Try active-mode FedCM; on anything but success/dismissal, fall through to
+    // the guaranteed full-page redirect.
+    try {
+      const result = await loginWithProviderFedCM("google");
+      if (result.status === "success") {
+        onSuccess(result.user);
+        return;
+      }
+      if (result.status === "dismissed") return;
+    } catch (err) {
+      // Ignore and fall through to redirect.
+    }
+    startGoogleRedirect(returnTo()).catch((err) =>
+      toast.error("Sign in failed: " + err.message),
+    );
+  };
+
+  const handleFacebook = async () => {
+    try {
+      // Try active-mode FedCM first; on anything but success/dismissal, fall
+      // through to the SDK's own popup login.
+      let result;
+      try {
+        result = await loginWithProviderFedCM("facebook");
+      } catch (err) {
+        result = { status: "unavailable" };
+      }
+      if (result.status !== "success" && result.status !== "dismissed") {
+        result = await loginWithFacebookSDK();
+      }
+      if (result.status === "success") {
+        onSuccess(result.user);
+      } else if (result.status !== "dismissed") {
+        toast.error("Facebook sign-in is unavailable. Please try again.");
+      }
+    } catch (err) {
+      toast.error("Sign in failed: " + err.message);
+    }
+  };
+
+  return (
+    <div className="auth-fallback" role="group" aria-label="Sign in options">
+      {!isFedCMSupported() && (
+        <p className="auth-fallback-note">
+          This browser doesn't support FedCM — sign in with a provider directly.
+        </p>
+      )}
+      <p className="auth-fallback-text">
+        Choose a provider to continue. You'll be prompted to sign in if you
+        aren't already.
+      </p>
+      <div className="auth-fallback-actions">
+        <button className="btn btn-primary" onClick={handleGoogle}>
+          Continue with Google
+        </button>
+        <button className="btn btn-primary" onClick={handleFacebook}>
+          Continue with Facebook
+        </button>
+      </div>
+      {onClose && (
+        <button className="btn-small btn-outline" onClick={onClose}>
+          Cancel
+        </button>
+      )}
+    </div>
   );
 }
 

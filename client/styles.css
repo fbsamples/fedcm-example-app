@@ -725,6 +725,77 @@ body {
   margin-top: 2rem;
 }
 
+/* --- Sign-in fallback dropdown (anchored to the Sign In button) --- */
+
+.nav-signin {
+  position: relative;
+}
+
+.nav-signin-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 200;
+  width: 260px;
+  max-width: calc(100vw - 3rem);
+  background: #fff;
+  border: 1px solid #e5e5e7;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  animation: fallback-in 0.12s ease-out;
+}
+
+@keyframes fallback-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.auth-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem;
+  text-align: center;
+}
+
+.auth-fallback-note {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  background: #fff3cd;
+  color: #856404;
+  font-size: 0.8rem;
+}
+
+.auth-fallback-text {
+  margin: 0;
+  color: #86868b;
+  font-size: 0.85rem;
+}
+
+.auth-fallback-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.auth-fallback-actions .btn {
+  width: 100%;
+}
+
+/* --- OAuth redirect callback page --- */
+
+.auth-callback {
+  text-align: center;
+  padding-top: 4rem;
+}
+
 /* --- Toasts --- */
 
 .toast-container {
